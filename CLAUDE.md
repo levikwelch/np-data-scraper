@@ -26,9 +26,10 @@ This produces cleaner data than scraping with no legal risk and far fewer broken
 ├── data/                            # raw downloads (gitignored)
 ├── output/                          # filtered results (gitignored)
 └── scripts/
-    ├── 01_download_irs_bmf.py       # bulk IRS download
-    ├── 02_filter_candidates.py      # apply funding criteria
-    └── 03_enrich_propublica.py      # API enrichment for shortlist
+    ├── 01_download_irs_bmf.py            # bulk IRS download
+    ├── 01b_download_auto_revocation.py   # current revoked-EIN list (more current than BMF STATUS)
+    ├── 02_filter_candidates.py           # apply funding criteria
+    └── 03_enrich_propublica.py           # API enrichment for shortlist
 ```
 
 ## Common commands
@@ -38,9 +39,10 @@ This produces cleaner data than scraping with no legal risk and far fewer broken
 pip install -r requirements.txt
 
 # pipeline (run in order)
-python scripts/01_download_irs_bmf.py       # ~3-5 min, ~500MB on disk
-python scripts/02_filter_candidates.py      # edit FILTERS block first
-python scripts/03_enrich_propublica.py      # optional, slow (rate-limited)
+python scripts/01_download_irs_bmf.py            # ~3-5 min, ~500MB on disk
+python scripts/01b_download_auto_revocation.py   # ~30 sec, ~46MB; required by 02
+python scripts/02_filter_candidates.py           # edit FILTERS block first
+python scripts/03_enrich_propublica.py           # optional, slow (rate-limited)
 
 # interactive UI for browsing/filtering/exporting the candidate pool
 python app.py                                # Flask, opens at http://127.0.0.1:8501

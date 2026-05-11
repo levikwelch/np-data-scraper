@@ -62,6 +62,11 @@ FILTERS: dict = {
     # FOUNDATION codes 02/03/04 are private foundations — wrong target when
     # you're trying to GIVE money out. Codes 10-18, 21-24 are public charities.
     "public_charity_only": True,
+
+    # Cross-check against the IRS Auto-Revocation List (data/revoked_eins.csv)
+    # and drop any EIN whose exempt status has been revoked and not reinstated.
+    # BMF STATUS can lag revocations by weeks; this closes that gap.
+    "exclude_revoked": True,
 }
 # ============================================================================
 
@@ -125,6 +130,21 @@ def main() -> None:
         apply(
             "public charity (not private foundation)",
             df["FOUNDATION"].fillna("").isin(PUBLIC_CHARITY_FOUNDATION_CODES),
+        )
+
+    if FILTERS["exclude_revoked"]:
+        revoked_path = DATA_DIR / "revoked_eins.csv"
+        if not revoked_path.exists():
+            raise FileNotFoundError(
+                f"{revoked_path} not found. Run scripts/01b_download_auto_revocation.py "
+                f"first, or set FILTERS['exclude_revoked'] = False to skip this check."
+            )
+        revoked = pd.read_csv(revoked_path, dtype=str)["EIN"].astype(str)
+        revoked_set = set(revoked.str.replace("-", "", regex=False).str.strip())
+        bmf_ein = df["EIN"].fillna("").astype(str).str.replace("-", "", regex=False).str.strip()
+        apply(
+            f"not on auto-revocation list ({len(revoked_set):,} EINs)",
+            ~bmf_ein.isin(revoked_set),
         )
 
     if FILTERS["min_revenue"] is not None:
