@@ -11,6 +11,7 @@ Cross-references data/propublica_cache/ for the "enrichment cached" filter.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import traceback
@@ -21,7 +22,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -56,6 +57,12 @@ CONTACT_CSV_CANDIDATES = [
 ]
 CONTACT_COLS = ("website", "phone", "principal_officer_name", "mission", "latest_990_year")
 CACHE_DIR = DATA_ROOT / "data" / "propublica_cache"
+# Completed scrape CSVs are written here so they survive container restarts
+# and remain downloadable via /scrape/result/<id> long after the in-memory
+# SCRAPE_JOBS entry has been popped. Files are named "<job_id>__<fname>" so
+# we can recover the original download filename from the on-disk name.
+SCRAPES_DIR = OUTPUT_DIR / "scrapes"
+JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 NTEE_MAJOR = {
     "A": "Arts, Culture & Humanities",
@@ -154,6 +161,35 @@ REGION_LABELS = {
 
 def _ein9(ein: str) -> str:
     return "".join(c for c in str(ein) if c.isdigit()).zfill(9)
+
+
+def _sanitize_filename(fname: str) -> str:
+    """Strip path-unsafe characters from a user-supplied filename."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", fname).strip("._") or "scrape.csv"
+
+
+def _save_scrape_to_disk(job_id: str, csv_str: str, fname: str) -> Path:
+    """Persist a completed scrape CSV. Returns the on-disk path."""
+    SCRAPES_DIR.mkdir(parents=True, exist_ok=True)
+    safe = _sanitize_filename(fname)
+    out = SCRAPES_DIR / f"{job_id}__{safe}"
+    out.write_text(csv_str, encoding="utf-8")
+    return out
+
+
+def _find_saved_scrape(job_id: str) -> Path | None:
+    """Find a previously persisted scrape by job_id. Returns None if missing.
+    Validates job_id format to refuse path-traversal attempts."""
+    if not JOB_ID_RE.match(job_id) or not SCRAPES_DIR.exists():
+        return None
+    matches = list(SCRAPES_DIR.glob(f"{job_id}__*.csv"))
+    return matches[0] if matches else None
+
+
+def _original_fname(saved: Path) -> str:
+    """Extract the user-facing filename from an on-disk scrape (strip job_id prefix)."""
+    name = saved.name
+    return name.split("__", 1)[1] if "__" in name else name
 
 
 def _resolve_contact_csv() -> Path | None:
@@ -636,6 +672,15 @@ def scrape_start():
             if not fname.lower().endswith(".csv"):
                 fname += ".csv"
             total_emails = sum(len(v) for v in emails_by_ein.values())
+            # Persist to disk BEFORE marking the job done so a crash between
+            # here and the SCRAPE_LOCK update doesn't lose the result.
+            try:
+                _save_scrape_to_disk(job_id, csv_str, fname)
+                print(f"[scrape:{job_id}] persisted to {SCRAPES_DIR}/{job_id}__*",
+                      flush=True)
+            except Exception as e:
+                print(f"[scrape:{job_id}] disk persist failed (in-memory only): {e}",
+                      flush=True)
             with SCRAPE_LOCK:
                 job = SCRAPE_JOBS.get(job_id)
                 if job is not None:
@@ -680,22 +725,57 @@ def scrape_status(job_id: str):
 def scrape_result(job_id: str):
     with SCRAPE_LOCK:
         job = SCRAPE_JOBS.get(job_id)
-        if job is None:
-            return Response("unknown job", status=404)
-        if not job.get("done"):
-            return Response("not ready", status=409)
-        if job.get("error"):
-            return Response(job["error"], status=500, mimetype="text/plain")
-        csv_str = job["result_csv"]
-        fname = job["filename"]
-        # Free memory once delivered — single-shot download.
-        SCRAPE_JOBS.pop(job_id, None)
+        if job is not None:
+            if not job.get("done"):
+                return Response("not ready", status=409)
+            if job.get("error"):
+                return Response(job["error"], status=500, mimetype="text/plain")
+            csv_str = job["result_csv"]
+            fname = job["filename"]
+            # Free in-memory copy once delivered. The on-disk copy persists
+            # so a re-download via /scrape/result or /scrape/history works.
+            SCRAPE_JOBS.pop(job_id, None)
+            return Response(
+                csv_str,
+                mimetype="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+            )
 
-    return Response(
-        csv_str,
+    # Not in memory — fall back to the persistent on-disk copy.
+    saved = _find_saved_scrape(job_id)
+    if saved is None:
+        return Response("unknown job", status=404)
+    return send_file(
+        saved,
         mimetype="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        as_attachment=True,
+        download_name=_original_fname(saved),
     )
+
+
+@app.route("/scrape/history")
+def scrape_history():
+    """List every persisted scrape, newest first. Powers the Recent Scrapes UI."""
+    if not SCRAPES_DIR.exists():
+        return jsonify({"scrapes": []})
+    entries = []
+    for p in sorted(SCRAPES_DIR.glob("*.csv"),
+                    key=lambda x: x.stat().st_mtime, reverse=True):
+        name = p.name
+        jid, _, fname = name.partition("__")
+        if not fname:
+            fname = name
+            jid = name.rsplit(".csv", 1)[0][:12]
+        stat = p.stat()
+        entries.append({
+            "job_id": jid,
+            "filename": fname,
+            "size_bytes": stat.st_size,
+            "modified_epoch": int(stat.st_mtime),
+            "modified_iso": datetime.fromtimestamp(stat.st_mtime)
+                                    .isoformat(timespec="seconds"),
+        })
+    return jsonify({"scrapes": entries})
 
 
 if __name__ == "__main__":

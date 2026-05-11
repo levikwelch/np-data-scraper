@@ -316,6 +316,36 @@
       animation: indeterminate 1.4s ease-in-out infinite;
     }
     .progress-fill.error { background: #c44; }
+
+    /* Recent scrapes list */
+    .scrape-history { margin-top: 18px; }
+    .scrape-history h3 {
+      margin: 0 0 8px 0; font-size: 13px; font-weight: 600;
+      color: #cfcfcf; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .scrape-history-list {
+      display: flex; flex-direction: column; gap: 6px;
+      max-height: 260px; overflow-y: auto;
+    }
+    .scrape-history-item {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 14px; align-items: center;
+      padding: 9px 12px;
+      background: #0a0a0a; border: 1px solid #2e2e2e; border-radius: 6px;
+      font-size: 12.5px;
+    }
+    .scrape-history-item .name { color: #f0f0f0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .scrape-history-item .ts { color: #888; font-variant-numeric: tabular-nums; }
+    .scrape-history-item .size { color: #888; font-variant-numeric: tabular-nums; }
+    .scrape-history-item a.dl {
+      padding: 4px 10px; border: 1px solid #404040; border-radius: 4px;
+      color: #f0f0f0; text-decoration: none; font-size: 12px;
+      transition: background .12s, border-color .12s;
+    }
+    .scrape-history-item a.dl:hover { background: #262626; border-color: #5a5a5a; }
+    .scrape-history-empty { color: #666; font-size: 12px; font-style: italic; }
+
     @keyframes indeterminate {
       0%   { transform: translateX(-100%); }
       100% { transform: translateX(285%); }
@@ -562,6 +592,13 @@
           <div class="progress-fill indeterminate" id="scrape_fill"></div>
         </div>
         <div class="message" id="scrape_message"></div>
+      </div>
+
+      <div class="scrape-history" id="scrape_history">
+        <h3>Recent scrapes</h3>
+        <div class="scrape-history-list" id="scrape_history_list">
+          <div class="scrape-history-empty">No saved scrapes yet — completed scrapes are kept here and survive server restarts.</div>
+        </div>
       </div>
     </section>
   </main>
@@ -1156,6 +1193,36 @@ function hideProgressLater(ms = 4000) {
   }, ms);
 }
 
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+async function refreshScrapeHistory() {
+  const list = document.getElementById('scrape_history_list');
+  try {
+    const resp = await fetch('/scrape/history');
+    if (!resp.ok) return;
+    const { scrapes } = await resp.json();
+    if (!scrapes.length) {
+      list.innerHTML = '<div class="scrape-history-empty">No saved scrapes yet — completed scrapes are kept here and survive server restarts.</div>';
+      return;
+    }
+    list.innerHTML = scrapes.map(s => `
+      <div class="scrape-history-item">
+        <span class="name" title="${escapeHtml(s.filename)}">${escapeHtml(s.filename)}</span>
+        <span class="ts">${escapeHtml(s.modified_iso.replace('T', ' '))}</span>
+        <span class="size">${formatBytes(s.size_bytes)}</span>
+        <a class="dl" href="/scrape/result/${encodeURIComponent(s.job_id)}" download>Download</a>
+      </div>
+    `).join('');
+  } catch (e) {
+    // best-effort UI; failures aren't fatal
+  }
+}
+
 async function scrapeCsv() {
   document.getElementById('compact_hidden').value =
     document.getElementById('compact_check').checked ? '1' : '0';
@@ -1207,6 +1274,8 @@ async function scrapeCsv() {
         document.body.appendChild(a); a.click(); a.remove();
         note.textContent = 'Scrape complete — check your Downloads folder.';
         hideProgressLater();
+        // Refresh history so the new scrape appears in Recent scrapes.
+        refreshScrapeHistory();
         return;
       }
     }
@@ -1239,6 +1308,7 @@ function resetFilters() {
 
 refreshMap();
 updateResults();
+refreshScrapeHistory();
 </script>
 </body>
 </html>
