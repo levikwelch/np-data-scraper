@@ -1,0 +1,7 @@
+requests>=2.31
+pandas>=2.0
+tqdm>=4.66
+remotezip>=0.12
+inflate64>=1.0
+flask>=3.0
+gunicorn>=21.2

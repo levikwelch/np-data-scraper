@@ -1,0 +1,40 @@
+# Render Blueprint: nonprofit funding research Flask UI.
+#
+# After pushing this repo to GitHub:
+#   1. Go to dashboard.render.com -> New -> Blueprint
+#   2. Select this repo. Render reads render.yaml and provisions the service.
+#   3. After first deploy, open the service shell and run:
+#        python scripts/01_download_irs_bmf.py
+#        python scripts/02_filter_candidates.py
+#      That populates the persistent disk with the master CSV.
+#   4. Restart the service so app.py loads the new CSV.
+#
+# Plan sizing: the master CSV loads into a single pandas DataFrame held in
+# RAM for the life of the process. Starter (512 MB) is likely too small;
+# Standard (2 GB) is the safe default. Bump up if you see OOM restarts in
+# the Render logs.
+#
+# Single worker + threads is REQUIRED: scrape jobs live in process memory
+# (SCRAPE_JOBS dict + background threads). Multiple gunicorn workers would
+# each get a different copy and the polling endpoints would 404 randomly.
+
+services:
+  - type: web
+    name: nonprofit-funding-research
+    runtime: python
+    plan: standard
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      mkdir -p $DATA_ROOT/data $DATA_ROOT/output &&
+      gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: DATA_ROOT
+        value: /var/data
+      - key: PYTHON_VERSION
+        value: 3.12.4
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 10

@@ -1,0 +1,1244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nonprofit Grant Candidates</title>
+  <script src="/static/d3.v7.min.js"></script>
+  <script src="/static/topojson-client.min.js"></script>
+  <style>
+    /* ---- Monochrome dark theme ----
+       bg:           #0a0a0a  (near-black)
+       surface:      #141414
+       surface-2:    #1c1c1c
+       surface-3:    #262626
+       border:       #2e2e2e
+       border-hover: #404040
+       border-strong:#5a5a5a
+       text:         #f0f0f0
+       text-secondary:#cfcfcf
+       muted:        #888
+       dim:          #666
+       white:        #fafafa  (used for active/inverted accents)
+    */
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      display: flex; flex-direction: column;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0a0a0a; color: #f0f0f0;
+      font-size: 14px; line-height: 1.45;
+    }
+
+    a { color: #f0f0f0; text-decoration: underline; text-decoration-color: #555; }
+    a:hover { text-decoration-color: #f0f0f0; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: #0a0a0a; }
+    ::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: #404040; }
+
+    header {
+      background: #141414; color: #f0f0f0;
+      padding: 12px 22px;
+      display: flex; align-items: baseline; gap: 16px;
+      border-bottom: 1px solid #2e2e2e;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .2px; }
+    header .subtitle { font-size: 12px; color: #888; }
+    header .subtitle strong { color: #f0f0f0; font-weight: 600; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      flex: 1; min-height: 0;
+    }
+
+    aside {
+      background: #141414; border-right: 1px solid #2e2e2e;
+      padding: 14px; overflow-y: auto;
+    }
+
+    details {
+      border: 1px solid #2e2e2e; border-radius: 8px; margin-bottom: 10px;
+      background: #1c1c1c;
+    }
+    details > summary {
+      padding: 9px 12px; font-weight: 600; cursor: pointer; user-select: none;
+      font-size: 13px; color: #f0f0f0; list-style: none;
+      display: flex; align-items: center; gap: 6px;
+    }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before {
+      content: ""; width: 0; height: 0;
+      border-left: 5px solid #888;
+      border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+      transition: transform .15s;
+    }
+    details[open] > summary::before { transform: rotate(90deg); }
+    details[open] > summary { border-bottom: 1px solid #2e2e2e; }
+    .filter-body { padding: 12px; }
+    .filter-row { margin-bottom: 12px; }
+    .filter-row:last-child { margin-bottom: 0; }
+    .filter-row > label.label { display: block; font-size: 11px; color: #888; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%; padding: 7px 9px;
+      background: #0a0a0a; color: #f0f0f0;
+      border: 1px solid #2e2e2e; border-radius: 5px;
+      font-size: 13px; font-family: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input::placeholder { color: #666; }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: #888;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, .08);
+    }
+
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+    .radio-row label, .check-row label { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; cursor: pointer; color: #cfcfcf; }
+    .radio-row.stack label, .check-row.stack label { display: flex; margin-bottom: 4px; margin-right: 0; }
+    .radio-row input, .check-row input { margin: 0; accent-color: #f0f0f0; }
+
+    /* ---- Searchable multi-select (.ms) ---- */
+    .ms { position: relative; }
+    .ms-trigger {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+      min-height: 34px; padding: 4px 28px 4px 7px;
+      background: #0a0a0a; border: 1px solid #2e2e2e; border-radius: 5px;
+      cursor: text; transition: border-color .15s, box-shadow .15s;
+      position: relative;
+    }
+    .ms-trigger:hover { border-color: #404040; }
+    .ms.open .ms-trigger {
+      border-color: #888;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, .08);
+    }
+    .ms-arrow {
+      position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+      width: 0; height: 0; border-top: 5px solid #888;
+      border-left: 4px solid transparent; border-right: 4px solid transparent;
+      pointer-events: none;
+    }
+    .ms-placeholder { color: #666; font-size: 13px; padding: 3px 2px; }
+    .ms-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 6px 2px 8px;
+      background: #fafafa; color: #0a0a0a; border-radius: 999px;
+      font-size: 11.5px; font-weight: 500;
+    }
+    .ms-chip-x {
+      cursor: pointer; opacity: .55; padding: 0 2px;
+      font-size: 12px; line-height: 1;
+    }
+    .ms-chip-x:hover { opacity: 1; }
+
+    .ms-dropdown {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+      background: #141414; border: 1px solid #5a5a5a; border-radius: 6px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, .6);
+      max-height: 280px; display: flex; flex-direction: column;
+    }
+    .ms.hidden .ms-dropdown { display: none; }
+    .ms-search {
+      margin: 8px; padding: 6px 8px;
+      background: #0a0a0a; color: #f0f0f0;
+      border: 1px solid #2e2e2e; border-radius: 4px;
+      font-size: 12.5px;
+    }
+    .ms-options { overflow-y: auto; padding: 4px 0; }
+    .ms-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+      color: #cfcfcf;
+    }
+    .ms-item:hover { background: #1c1c1c; color: #fafafa; }
+    .ms-item.selected { color: #fafafa; background: #1c1c1c; }
+    .ms-item input { accent-color: #f0f0f0; }
+    .ms-empty { padding: 10px 12px; font-size: 12px; color: #666; font-style: italic; }
+
+    /* ---- Flat 2D US wireframe map ---- */
+    .map-wrap {
+      position: relative;
+      background: #000; border: 1px solid #2e2e2e; border-radius: 10px;
+      padding: 8px; margin-bottom: 10px;
+      display: flex; justify-content: center;
+    }
+    .map-canvas {
+      display: block; width: 296px; height: 188px;
+      cursor: pointer;
+    }
+    .map-hint {
+      position: absolute; bottom: 8px; left: 12px;
+      font-size: 10px; color: #888; letter-spacing: .2px;
+      background: rgba(0, 0, 0, .55); padding: 2px 6px;
+      border-radius: 4px; pointer-events: none;
+    }
+    .map-loading {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #888; font-size: 11px; font-style: italic;
+    }
+
+    .region-legend {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    }
+    .region-btn {
+      padding: 6px 8px; font-size: 11.5px; font-weight: 500;
+      background: #1c1c1c; color: #cfcfcf;
+      border: 1px solid #2e2e2e; border-radius: 5px;
+      cursor: pointer; text-align: left;
+      display: flex; align-items: center; gap: 6px;
+      transition: all .12s;
+    }
+    .region-btn:hover { border-color: #5a5a5a; color: #fafafa; }
+    .region-btn.active { background: #fafafa; border-color: #fafafa; color: #0a0a0a; }
+    .region-btn .dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      background: #555;
+    }
+    .region-btn[data-region="region1_northeast"] .dot { background: #404040; outline: 1px solid #555; }
+    .region-btn[data-region="region2_midatlantic_greatlakes"] .dot { background: #5a5a5a; }
+    .region-btn[data-region="region3_gulf_pacific"] .dot { background: #8a8a8a; }
+    .region-btn[data-region="region4_international_other"] .dot { background: #c4c4c4; }
+    .region-btn.active .dot { outline: 1px solid #0a0a0a; }
+
+    /* Reset button */
+    .reset-btn {
+      width: 100%; padding: 9px;
+      background: transparent; color: #cfcfcf;
+      border: 1px solid #404040; border-radius: 5px;
+      cursor: pointer; margin-bottom: 12px;
+      font-weight: 500; font-size: 13px;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .reset-btn:hover { background: #1c1c1c; border-color: #888; color: #fafafa; }
+
+    /* Main */
+    main { padding: 18px 22px; overflow-y: auto; background: #0a0a0a; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .metric {
+      background: #141414; border: 1px solid #2e2e2e; border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .metric .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .metric .value { font-size: 26px; font-weight: 700; color: #f0f0f0; margin-top: 5px; line-height: 1; }
+    .metric .delta { font-size: 11px; color: #666; margin-top: 5px; }
+    .metric.primary { border-color: #5a5a5a; background: #1c1c1c; }
+    .metric.primary .value { color: #fafafa; }
+    .metric.primary .delta { color: #888; }
+
+    section {
+      background: #141414; border: 1px solid #2e2e2e; border-radius: 10px;
+      padding: 16px 18px; margin-bottom: 16px;
+    }
+    section h2 {
+      margin: 0 0 12px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+      color: #888; font-weight: 700;
+    }
+
+    .table-controls {
+      display: flex; gap: 14px; align-items: center;
+      margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .table-controls > label { font-size: 12px; color: #888; display: inline-flex; align-items: center; gap: 5px; }
+    .table-controls select, .table-controls input {
+      padding: 5px 9px; width: auto;
+      font-size: 12px;
+    }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid #2e2e2e; border-radius: 8px;
+      max-height: 60vh; background: #0a0a0a;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 7px 11px; border-bottom: 1px solid #1c1c1c; text-align: left; white-space: nowrap; color: #cfcfcf; }
+    th { background: #1c1c1c; position: sticky; top: 0; font-weight: 600; color: #f0f0f0; z-index: 1; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover td { background: #1c1c1c; color: #fafafa; }
+
+    .breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .breakdown .table-wrap { max-height: 240px; }
+    .breakdown .small strong { color: #f0f0f0; }
+
+    .export-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .export-row input[type="text"] {
+      flex: 1; min-width: 280px;
+    }
+    .export-row > label { font-size: 12px; color: #cfcfcf; display: inline-flex; align-items: center; gap: 5px; }
+    button.primary {
+      padding: 9px 18px; background: #fafafa; color: #0a0a0a;
+      border: 1px solid #fafafa; border-radius: 5px; cursor: pointer;
+      font-size: 13px; font-weight: 600;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    button.primary:hover { background: #ffffff; border-color: #ffffff; }
+    button.primary:disabled { background: #2e2e2e; color: #666; border-color: #2e2e2e; cursor: not-allowed; }
+
+    .empty { text-align: center; padding: 28px; color: #666; font-style: italic; }
+    .small { font-size: 11.5px; color: #888; }
+
+    /* Scrape progress bar */
+    .scrape-progress {
+      margin-top: 12px;
+      padding: 12px 14px;
+      background: #0a0a0a;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      display: none;
+    }
+    .scrape-progress.visible { display: block; }
+    .scrape-progress .row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px; margin-bottom: 8px;
+    }
+    .scrape-progress .stage {
+      font-size: 12px; color: #f0f0f0; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    .scrape-progress .pct {
+      font-size: 12px; color: #cfcfcf; font-variant-numeric: tabular-nums;
+    }
+    .scrape-progress .message {
+      font-size: 12px; color: #888; margin-top: 6px; min-height: 1.4em;
+    }
+    .progress-track {
+      width: 100%; height: 8px; background: #1c1c1c;
+      border-radius: 4px; overflow: hidden; position: relative;
+    }
+    .progress-fill {
+      height: 100%; background: #fafafa;
+      width: 0%; transition: width .3s ease;
+    }
+    .progress-fill.indeterminate {
+      width: 35%;
+      animation: indeterminate 1.4s ease-in-out infinite;
+    }
+    .progress-fill.error { background: #c44; }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(285%); }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Nonprofit Grant Candidates</h1>
+  <span class="subtitle">
+    Source pool: <strong>{{ "{:,}".format(total_rows) }}</strong> orgs ·
+    <strong>{{ "{:,}".format(enriched_count) }}</strong> ProPublica enriched
+  </span>
+</header>
+
+<div class="layout">
+  <aside>
+    <form id="filters" action="/export.csv" method="post">
+      <button type="button" class="reset-btn" onclick="resetFilters()">Reset all filters</button>
+
+      <details open>
+        <summary>Search</summary>
+        <div class="filter-body">
+          <div class="filter-row">
+            <label class="label">Name contains</label>
+            <input type="text" name="name" autocomplete="off" placeholder="case-insensitive substring">
+          </div>
+          <div class="filter-row">
+            <label class="label">EIN starts with</label>
+            <input type="text" name="ein" autocomplete="off" placeholder="9-digit EIN or prefix">
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Geography</summary>
+        <div class="filter-body">
+          <div class="filter-row">
+            <label class="label">States</label>
+            <div class="ms" data-name="states" data-placeholder="Select states..." data-options-id="states-options"></div>
+          </div>
+          <div class="filter-row">
+            <label class="label">City contains</label>
+            <input type="text" name="city" autocomplete="off">
+          </div>
+          <div class="filter-row">
+            <label class="label">ZIP starts with</label>
+            <input type="text" name="zip" autocomplete="off">
+          </div>
+          <div class="filter-row">
+            <label class="label">IRS source region (click a state or use buttons)</label>
+            <div class="map-wrap">
+              <canvas id="us-map" class="map-canvas" width="296" height="188"></canvas>
+              <div class="map-hint">Click a state to filter by its region</div>
+              <div class="map-loading" id="map-loading">Loading map…</div>
+            </div>
+            <div class="region-legend">
+              {% set region_order = ['region1_northeast', 'region2_midatlantic_greatlakes', 'region3_gulf_pacific', 'region4_international_other'] %}
+              {% for r in region_order %}
+                {% if r in regions %}
+                  <button type="button" class="region-btn" data-region="{{ r }}">
+                    <span class="dot"></span>{{ region_labels.get(r, r) }}
+                  </button>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <!-- Hidden checkboxes carry the form value -->
+            <div style="display: none;">
+              {% for r in regions %}
+                <input type="checkbox" name="regions" value="{{ r }}" id="region-input-{{ loop.index }}">
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Mission</summary>
+        <div class="filter-body">
+          <div class="filter-row">
+            <label class="label">Cause area (NTEE)</label>
+            <div class="ms" data-name="ntee_major" data-placeholder="Select cause areas..." data-options-id="ntee-options"></div>
+          </div>
+          <div class="filter-row">
+            <label class="label">Specific NTEE code starts with</label>
+            <input type="text" name="ntee_code" autocomplete="off" placeholder="e.g. B82, P20, A60">
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Financials</summary>
+        <div class="filter-body">
+          <div class="filter-row">
+            <label class="label">Revenue (USD)</label>
+            <div class="two-col">
+              <input type="number" name="min_rev" placeholder="min" min="0" step="10000">
+              <input type="number" name="max_rev" placeholder="max" min="0" step="10000">
+            </div>
+          </div>
+          <div class="filter-row">
+            <label class="label">Assets (USD)</label>
+            <div class="two-col">
+              <input type="number" name="min_assets" placeholder="min" min="0" step="10000">
+              <input type="number" name="max_assets" placeholder="max" min="0" step="10000">
+            </div>
+          </div>
+          <div class="filter-row">
+            <label class="label">Income (USD)</label>
+            <div class="two-col">
+              <input type="number" name="min_income" placeholder="min" min="0" step="10000">
+              <input type="number" name="max_income" placeholder="max" min="0" step="10000">
+            </div>
+          </div>
+          <div class="filter-row">
+            <div class="check-row">
+              <label><input type="checkbox" name="require_revenue" value="1"> Exclude orgs with no revenue reported</label>
+            </div>
+          </div>
+          <div class="filter-row">
+            <label class="label">Tax-deductible donations</label>
+            <div class="radio-row">
+              <label><input type="radio" name="deductibility" value="" checked> Any</label>
+              <label><input type="radio" name="deductibility" value="yes"> Yes</label>
+              <label><input type="radio" name="deductibility" value="no"> No</label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {% if ruling_min %}
+      <details>
+        <summary>Time</summary>
+        <div class="filter-body">
+          <div class="filter-row">
+            <label class="label">IRS ruling year ({{ ruling_min }}-{{ ruling_max }})</label>
+            <div class="two-col">
+              <input type="number" name="ruling_min" placeholder="from" min="{{ ruling_min }}" max="{{ ruling_max }}">
+              <input type="number" name="ruling_max" placeholder="to" min="{{ ruling_min }}" max="{{ ruling_max }}">
+            </div>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+
+      <input type="hidden" name="sort_col" id="sort_col" value="REVENUE_AMT">
+      <input type="hidden" name="sort_desc" id="sort_desc" value="1">
+      <input type="hidden" name="preview_limit" id="preview_limit" value="500">
+      <input type="hidden" name="compact" id="compact_hidden" value="0">
+      <input type="hidden" name="fname" id="fname_hidden" value="">
+    </form>
+  </aside>
+
+  <main>
+    <div class="metrics">
+      <div class="metric primary">
+        <div class="label">Matching leads</div>
+        <div class="value" id="m-count">—</div>
+        <div class="delta" id="m-pct">—</div>
+      </div>
+      <div class="metric">
+        <div class="label">Combined revenue</div>
+        <div class="value" id="m-rev">—</div>
+        <div class="delta">most recent reported</div>
+      </div>
+      <div class="metric">
+        <div class="label">States represented</div>
+        <div class="value" id="m-states">—</div>
+        <div class="delta">distinct U.S. states</div>
+      </div>
+      <div class="metric">
+        <div class="label">NTEE codes</div>
+        <div class="value" id="m-ntee">—</div>
+        <div class="delta">distinct cause codes</div>
+      </div>
+    </div>
+
+    <section>
+      <h2>Distribution</h2>
+      <div class="breakdown">
+        <div>
+          <div class="small" style="margin-bottom: 6px;"><strong>Top 15 states</strong></div>
+          <div id="top-states"></div>
+        </div>
+        <div>
+          <div class="small" style="margin-bottom: 6px;"><strong>Top 15 NTEE major causes</strong></div>
+          <div id="top-ntee"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Preview</h2>
+      <div class="table-controls">
+        <label>Sort by
+          <select id="sort_col_select">
+            {% for c in preview_cols %}
+              <option value="{{ c }}"{% if c == "REVENUE_AMT" %} selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><input type="checkbox" id="sort_desc_check" checked> Descending</label>
+        <label>Show
+          <select id="preview_limit_select">
+            <option value="100">100</option>
+            <option value="500" selected>500</option>
+            <option value="1000">1,000</option>
+            <option value="2500">2,500</option>
+          </select>
+          rows
+        </label>
+        <span class="small" id="preview-caption"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="results">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Export filtered CSV</h2>
+      <div class="export-row">
+        <input type="text" id="fname_input" placeholder="auto: grant_candidates_filtered_YYYYMMDD_HHMMSS.csv">
+        <label><input type="checkbox" id="compact_check"> Preview columns only</label>
+        <button type="button" class="primary" onclick="downloadCsv()">
+          Download <span id="dl-count">0</span> leads
+        </button>
+        <button type="button" class="primary" id="scrape_btn" onclick="scrapeCsv()" title="Run the IRS Form 990 XML lookup live for these leads, then download — fills in website / phone / mission for orgs that filed a full 990.">
+          Scrape <span id="scrape-count">0</span> leads
+        </button>
+        <span class="small" id="export-note"></span>
+      </div>
+      <div class="small" style="margin-top: 6px; color: #888;">
+        Scrape pulls website + phone + mission from each lead's most recent IRS Form 990 filing. Cached results return instantly; new lookups can take several minutes for large lists.
+      </div>
+      <div class="scrape-progress" id="scrape_progress">
+        <div class="row">
+          <span class="stage" id="scrape_stage">Starting…</span>
+          <span class="pct" id="scrape_pct"></span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill indeterminate" id="scrape_fill"></div>
+        </div>
+        <div class="message" id="scrape_message"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- option data for the searchable multi-selects (Jinja's tojson is HTML-safe) -->
+<script id="ntee-options" type="application/json">{{ ntee_options | tojson }}</script>
+<script id="states-options" type="application/json">{{ states_options | tojson }}</script>
+<script id="state-region-data" type="application/json">{{ state_region | tojson }}</script>
+
+<script>
+const NUMERIC_COLS = new Set(['REVENUE_AMT', 'ASSET_AMT', 'INCOME_AMT', 'RULING_YEAR']);
+const MONEY_COLS = new Set(['REVENUE_AMT', 'ASSET_AMT', 'INCOME_AMT']);
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// ---------- Searchable Multi-Select ----------
+class MultiSelect {
+  constructor(root) {
+    this.root = root;
+    this.name = root.dataset.name;
+    this.placeholder = root.dataset.placeholder || 'Select...';
+    const data = document.getElementById(root.dataset.optionsId);
+    this.options = data ? JSON.parse(data.textContent) : [];
+    this.selected = new Set();
+    this.query = '';
+    this.build();
+    this.attach();
+  }
+
+  build() {
+    this.root.classList.add('hidden');
+    this.root.innerHTML = `
+      <div class="ms-trigger" tabindex="0">
+        <span class="ms-display"></span>
+        <span class="ms-arrow"></span>
+      </div>
+      <div class="ms-dropdown">
+        <input type="text" class="ms-search" placeholder="Search...">
+        <div class="ms-options"></div>
+      </div>
+      <div class="ms-hidden-inputs"></div>
+    `;
+    this.trigger = this.root.querySelector('.ms-trigger');
+    this.display = this.root.querySelector('.ms-display');
+    this.dropdown = this.root.querySelector('.ms-dropdown');
+    this.search = this.root.querySelector('.ms-search');
+    this.optList = this.root.querySelector('.ms-options');
+    this.hiddenInputs = this.root.querySelector('.ms-hidden-inputs');
+    this.renderDisplay();
+  }
+
+  open() {
+    this.root.classList.remove('hidden');
+    this.root.classList.add('open');
+    this.search.value = this.query;
+    this.renderOptions();
+    setTimeout(() => this.search.focus(), 0);
+  }
+  close() {
+    this.root.classList.remove('open');
+    this.root.classList.add('hidden');
+  }
+  toggle() {
+    if (this.root.classList.contains('open')) this.close();
+    else this.open();
+  }
+
+  renderDisplay() {
+    if (this.selected.size === 0) {
+      this.display.innerHTML = `<span class="ms-placeholder">${escapeHtml(this.placeholder)}</span>`;
+      return;
+    }
+    const labelByValue = new Map(this.options.map(o => [o.value, o.label]));
+    const chips = Array.from(this.selected).map(v => {
+      const lbl = labelByValue.get(v) || v;
+      const short = lbl.length > 22 ? lbl.slice(0, 20) + '…' : lbl;
+      return `<span class="ms-chip" data-v="${escapeHtml(v)}">${escapeHtml(short)}<span class="ms-chip-x" title="Remove">✕</span></span>`;
+    });
+    this.display.innerHTML = chips.join('');
+  }
+
+  renderOptions() {
+    const q = this.query.toLowerCase();
+    const filtered = this.options.filter(o => !q || o.label.toLowerCase().includes(q));
+    if (filtered.length === 0) {
+      this.optList.innerHTML = '<div class="ms-empty">No matches.</div>';
+      return;
+    }
+    this.optList.innerHTML = filtered.map(o => {
+      const sel = this.selected.has(o.value);
+      return `<label class="ms-item${sel ? ' selected' : ''}" data-v="${escapeHtml(o.value)}">
+        <input type="checkbox" ${sel ? 'checked' : ''}> ${escapeHtml(o.label)}
+      </label>`;
+    }).join('');
+  }
+
+  syncForm() {
+    this.hiddenInputs.innerHTML = '';
+    for (const v of this.selected) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = this.name;
+      inp.value = v;
+      this.hiddenInputs.appendChild(inp);
+    }
+  }
+
+  toggleValue(v) {
+    if (this.selected.has(v)) this.selected.delete(v);
+    else this.selected.add(v);
+    this.syncForm();
+    this.renderDisplay();
+    this.renderOptions();
+    this.root.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  attach() {
+    this.trigger.addEventListener('click', (e) => {
+      const x = e.target.closest('.ms-chip-x');
+      if (x) {
+        const chip = x.closest('.ms-chip');
+        e.stopPropagation();
+        this.toggleValue(chip.dataset.v);
+        return;
+      }
+      this.toggle();
+    });
+    this.trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.toggle(); }
+    });
+    this.search.addEventListener('input', e => {
+      this.query = e.target.value;
+      this.renderOptions();
+    });
+    this.optList.addEventListener('click', e => {
+      const item = e.target.closest('.ms-item');
+      if (!item) return;
+      e.preventDefault();
+      this.toggleValue(item.dataset.v);
+    });
+    document.addEventListener('click', e => {
+      if (!this.root.contains(e.target)) this.close();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') this.close();
+    });
+  }
+
+  reset() {
+    this.selected.clear();
+    this.query = '';
+    this.syncForm();
+    this.renderDisplay();
+  }
+}
+
+const multiSelects = Array.from(document.querySelectorAll('.ms')).map(el => new MultiSelect(el));
+
+// ---------- Region selection (buttons + hidden checkboxes) ----------
+const regionChangeHandlers = [];
+function onRegionChange(fn) { regionChangeHandlers.push(fn); }
+
+function regionInputFor(region) {
+  return document.querySelector(`input[name="regions"][value="${region}"]`);
+}
+
+function selectedRegions() {
+  return Array.from(document.querySelectorAll('input[name="regions"]:checked')).map(i => i.value);
+}
+
+function toggleRegion(region) {
+  const inp = regionInputFor(region);
+  if (!inp) return;
+  inp.checked = !inp.checked;
+  refreshMap();
+  document.getElementById('filters').dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function refreshMap() {
+  const sel = new Set(selectedRegions());
+  document.querySelectorAll('.region-btn').forEach(btn => {
+    if (sel.has(btn.dataset.region)) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+  for (const fn of regionChangeHandlers) fn();
+}
+
+document.querySelectorAll('.region-btn').forEach(btn => {
+  btn.addEventListener('click', () => toggleRegion(btn.dataset.region));
+});
+
+// ---------- Wireframe dotted US map (flat 2D, click-to-select region) ----------
+(function initUsMap() {
+  const canvas = document.getElementById('us-map');
+  if (!canvas || typeof d3 === 'undefined' || typeof topojson === 'undefined') return;
+  const ctx = canvas.getContext('2d');
+
+  const W = 296, H = 188;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+
+  // FIPS code -> 2-letter state abbreviation (50 states + DC).
+  const FIPS_TO_ABBR = {
+    '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT','10':'DE',
+    '11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL','18':'IN','19':'IA',
+    '20':'KS','21':'KY','22':'LA','23':'ME','24':'MD','25':'MA','26':'MI','27':'MN',
+    '28':'MS','29':'MO','30':'MT','31':'NE','32':'NV','33':'NH','34':'NJ','35':'NM',
+    '36':'NY','37':'NC','38':'ND','39':'OH','40':'OK','41':'OR','42':'PA','44':'RI',
+    '45':'SC','46':'SD','47':'TN','48':'TX','49':'UT','50':'VT','51':'VA','53':'WA',
+    '54':'WV','55':'WI','56':'WY',
+  };
+
+  const STATE_REGION_MAP = JSON.parse(
+    document.getElementById('state-region-data').textContent
+  );
+
+  const projection = d3.geoAlbersUsa();  // built-in US-only projection (AK + HI insets)
+  const path = d3.geoPath().projection(projection).context(ctx);
+
+  // Iterative Douglas-Peucker to make region outlines look simpler/straighter.
+  function simplifyRing(ring, epsilon) {
+    if (ring.length < 4) return ring.slice();
+    const epsSq = epsilon * epsilon;
+    const keep = new Uint8Array(ring.length);
+    keep[0] = 1;
+    keep[ring.length - 1] = 1;
+    const stack = [[0, ring.length - 1]];
+    while (stack.length) {
+      const [first, last] = stack.pop();
+      const [x1, y1] = ring[first];
+      const [x2, y2] = ring[last];
+      const dx = x2 - x1, dy = y2 - y1;
+      const denomSq = dx * dx + dy * dy;
+      let maxDistSq = 0, maxIdx = -1;
+      for (let i = first + 1; i < last; i++) {
+        const [px, py] = ring[i];
+        let dSq;
+        if (denomSq === 0) {
+          const ax = px - x1, ay = py - y1;
+          dSq = ax * ax + ay * ay;
+        } else {
+          let t = ((px - x1) * dx + (py - y1) * dy) / denomSq;
+          if (t < 0) t = 0; else if (t > 1) t = 1;
+          const cx = x1 + t * dx, cy = y1 + t * dy;
+          const ex = px - cx, ey = py - cy;
+          dSq = ex * ex + ey * ey;
+        }
+        if (dSq > maxDistSq) { maxDistSq = dSq; maxIdx = i; }
+      }
+      if (maxDistSq > epsSq && maxIdx !== -1) {
+        keep[maxIdx] = 1;
+        stack.push([first, maxIdx]);
+        stack.push([maxIdx, last]);
+      }
+    }
+    const out = [];
+    for (let i = 0; i < ring.length; i++) if (keep[i]) out.push(ring[i]);
+    return out;
+  }
+
+  function simplifyFeatureInPlace(f, epsilon) {
+    const g = f.geometry;
+    const simplifyRings = (rings) => rings.map(r => simplifyRing(r, epsilon));
+    if (g.type === 'Polygon') {
+      g.coordinates = simplifyRings(g.coordinates);
+    } else if (g.type === 'MultiPolygon') {
+      g.coordinates = g.coordinates.map(simplifyRings);
+    }
+  }
+
+  let regionFeatures = null;    // { region_key -> GeoJSON Feature (merged states) }
+  const REGION_KEYS = [
+    'region1_northeast',
+    'region2_midatlantic_greatlakes',
+    'region3_gulf_pacific',
+    'region4_international_other',
+  ];
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    if (!regionFeatures) return;
+
+    const selected = new Set(selectedRegions());
+    const anySelected = selected.size > 0;
+
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // 1. Subtle white wash over selected regions so they pop slightly.
+    if (anySelected) {
+      ctx.beginPath();
+      for (const r of REGION_KEYS) {
+        if (selected.has(r) && regionFeatures[r]) path(regionFeatures[r]);
+      }
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+      ctx.fill();
+    }
+
+    // 2. Light xy grid clipped to each region.
+    const gridStep = 14;
+    for (const r of REGION_KEYS) {
+      if (!regionFeatures[r]) continue;
+      const isSel = selected.has(r);
+      ctx.save();
+      ctx.beginPath();
+      path(regionFeatures[r]);
+      ctx.clip();
+      ctx.strokeStyle = isSel
+        ? 'rgba(255, 255, 255, 0.22)'
+        : 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 0.4;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += gridStep) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+      }
+      for (let y = 0; y <= H; y += gridStep) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 3. Default outlines (or just un-selected outlines when there's a selection).
+    ctx.beginPath();
+    for (const r of REGION_KEYS) {
+      if (!regionFeatures[r]) continue;
+      if (!anySelected || !selected.has(r)) path(regionFeatures[r]);
+    }
+    ctx.strokeStyle = '#fafafa';
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+
+    // 4. Selected outline: a touch thicker, full white, with a soft glow.
+    if (anySelected) {
+      ctx.beginPath();
+      for (const r of REGION_KEYS) {
+        if (selected.has(r) && regionFeatures[r]) path(regionFeatures[r]);
+      }
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.55)';
+      ctx.shadowBlur = 4;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Click handler: hit-test each region polygon directly.
+  canvas.addEventListener('click', (e) => {
+    if (!regionFeatures) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    for (const r of REGION_KEYS) {
+      if (!regionFeatures[r]) continue;
+      ctx.beginPath();
+      path(regionFeatures[r]);
+      if (ctx.isPointInPath(x, y)) {
+        toggleRegion(r);
+        return;
+      }
+    }
+  });
+
+  // Re-render whenever region selection changes (via buttons or canvas click).
+  onRegionChange(render);
+
+  fetch('/static/us-states-10m.json')
+    .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+    .then(topo => {
+      // Group state TopoJSON geometries by their IRS region.
+      const groups = {};
+      for (const r of REGION_KEYS) groups[r] = [];
+      for (const g of topo.objects.states.geometries) {
+        const abbr = FIPS_TO_ABBR[String(g.id).padStart(2, '0')];
+        const region = STATE_REGION_MAP[abbr];
+        if (region && groups[region]) groups[region].push(g);
+      }
+
+      // Merge each group with topojson.merge -- this dissolves the shared
+      // arcs between states so internal state boundaries vanish.
+      // We skip the polygonal simplification; the source us-atlas/states-10m
+      // is already lightly simplified, and keeping its detail gives smoother
+      // (less jagged) outlines at this scale.
+      regionFeatures = {};
+      for (const r of REGION_KEYS) {
+        if (groups[r].length === 0) continue;
+        const mergedGeom = topojson.merge(topo, groups[r]);
+        regionFeatures[r] = { type: 'Feature', geometry: mergedGeom, properties: { region: r } };
+      }
+
+      // Fit projection to the union of all region polygons, with extra inset
+      // so the map sits visibly inside the wrap's border.
+      const fc = { type: 'FeatureCollection', features: Object.values(regionFeatures) };
+      const inset = 16;
+      projection.fitExtent([[inset, inset], [W - inset, H - inset]], fc);
+
+      const loading = document.getElementById('map-loading');
+      if (loading) loading.style.display = 'none';
+      render();
+    })
+    .catch(err => {
+      const loading = document.getElementById('map-loading');
+      if (loading) loading.textContent = 'Map unavailable';
+      console.error('Failed to load US states:', err);
+    });
+})();
+
+// ---------- Form -> server live update ----------
+const form = document.getElementById('filters');
+let timer = null;
+let inflight = null;
+
+function debouncedUpdate(delay) {
+  clearTimeout(timer);
+  timer = setTimeout(updateResults, delay);
+}
+form.addEventListener('input', () => debouncedUpdate(250));
+form.addEventListener('change', () => debouncedUpdate(80));
+
+document.getElementById('sort_col_select').addEventListener('change', e => {
+  document.getElementById('sort_col').value = e.target.value;
+  debouncedUpdate(50);
+});
+document.getElementById('sort_desc_check').addEventListener('change', e => {
+  document.getElementById('sort_desc').value = e.target.checked ? '1' : '0';
+  debouncedUpdate(50);
+});
+document.getElementById('preview_limit_select').addEventListener('change', e => {
+  document.getElementById('preview_limit').value = e.target.value;
+  debouncedUpdate(50);
+});
+
+function fmtMoney(n) {
+  n = Number(n) || 0;
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + Math.round(n / 1e3).toLocaleString() + 'K';
+  return '$' + n.toLocaleString();
+}
+
+async function updateResults() {
+  if (inflight) inflight.abort();
+  inflight = new AbortController();
+  const fd = new FormData(form);
+  try {
+    const resp = await fetch('/api/results', { method: 'POST', body: fd, signal: inflight.signal });
+    if (!resp.ok) return;
+    const d = await resp.json();
+    renderMetrics(d);
+    renderBreakdown(d);
+    renderTable(d);
+    document.getElementById('dl-count').textContent = d.count.toLocaleString();
+    document.getElementById('scrape-count').textContent = d.count.toLocaleString();
+    const note = document.getElementById('export-note');
+    if (d.count > 100000) note.textContent = `Large export (~${(d.count * 0.0003).toFixed(0)} MB).`;
+    else note.textContent = '';
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error(e);
+  }
+}
+
+function renderMetrics(d) {
+  document.getElementById('m-count').textContent = d.count.toLocaleString();
+  const pct = d.total ? (d.count / d.total * 100).toFixed(1) : '0.0';
+  document.getElementById('m-pct').textContent = pct + '% of pool';
+  document.getElementById('m-rev').textContent = fmtMoney(d.rev_total);
+  document.getElementById('m-states').textContent = d.states_n.toLocaleString();
+  document.getElementById('m-ntee').textContent = d.ntee_n.toLocaleString();
+}
+
+function renderBreakdown(d) {
+  document.getElementById('top-states').innerHTML = renderRanked(d.top_states, 'State');
+  document.getElementById('top-ntee').innerHTML = renderRanked(d.top_ntee_major, 'NTEE major');
+}
+
+function renderRanked(obj, keyLabel) {
+  const entries = Object.entries(obj || {});
+  if (!entries.length) return '<div class="empty small">No matches.</div>';
+  let html = '<div class="table-wrap"><table>';
+  html += `<thead><tr><th>${keyLabel}</th><th class="num">Count</th></tr></thead><tbody>`;
+  for (const [k, v] of entries) {
+    html += `<tr><td>${escapeHtml(k)}</td><td class="num">${Number(v).toLocaleString()}</td></tr>`;
+  }
+  return html + '</tbody></table></div>';
+}
+
+function renderTable(d) {
+  const headRow = document.querySelector('#results thead tr');
+  headRow.innerHTML = d.preview_cols.map(c => {
+    const cls = NUMERIC_COLS.has(c) ? ' class="num"' : '';
+    return `<th${cls}>${escapeHtml(c)}</th>`;
+  }).join('');
+  const tbody = document.querySelector('#results tbody');
+  if (!d.preview_rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${d.preview_cols.length}" class="empty">No matches.</td></tr>`;
+    document.getElementById('preview-caption').textContent = '';
+    return;
+  }
+  const html = d.preview_rows.map(row => {
+    const cells = row.map((v, i) => {
+      const col = d.preview_cols[i];
+      let cls = '';
+      let display = (v === null || v === undefined) ? '' : v;
+      if (typeof display === 'number') {
+        cls = ' class="num"';
+        if (MONEY_COLS.has(col)) display = '$' + Math.round(display).toLocaleString();
+        else display = display.toLocaleString();
+      } else if (NUMERIC_COLS.has(col)) {
+        cls = ' class="num"';
+      }
+      return `<td${cls}>${escapeHtml(String(display))}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  tbody.innerHTML = html;
+  const limit = parseInt(document.getElementById('preview_limit').value, 10) || 500;
+  const shown = Math.min(d.preview_rows.length, limit);
+  document.getElementById('preview-caption').textContent =
+    `Showing first ${shown.toLocaleString()} of ${d.count.toLocaleString()} matches.`;
+}
+
+function downloadCsv() {
+  document.getElementById('compact_hidden').value =
+    document.getElementById('compact_check').checked ? '1' : '0';
+  document.getElementById('fname_hidden').value =
+    document.getElementById('fname_input').value || '';
+  form.action = '/export.csv';
+  form.submit();
+}
+
+const SCRAPE_STAGES = {
+  queued: 'Queued',
+  scanning_cache: 'Scanning local cache',
+  loading_indexes: 'Loading IRS indexes',
+  building_lookup: 'Building EIN lookup',
+  fetching_batches: 'Fetching 990 filings',
+  scraping_emails: 'Scraping emails from websites',
+  done: 'Complete',
+  error: 'Error',
+};
+
+function updateProgressUI(s) {
+  const pBox = document.getElementById('scrape_progress');
+  const stageEl = document.getElementById('scrape_stage');
+  const fill = document.getElementById('scrape_fill');
+  const pctEl = document.getElementById('scrape_pct');
+  const msgEl = document.getElementById('scrape_message');
+
+  pBox.classList.add('visible');
+  stageEl.textContent = SCRAPE_STAGES[s.stage] || s.stage || '...';
+  msgEl.textContent = s.message || '';
+
+  fill.classList.remove('error');
+  if (s.stage === 'error') {
+    fill.classList.remove('indeterminate');
+    fill.classList.add('error');
+    fill.style.width = '100%';
+    pctEl.textContent = '';
+    return;
+  }
+  if (s.total > 0) {
+    const pct = Math.min(100, Math.round((s.current / s.total) * 100));
+    fill.classList.remove('indeterminate');
+    fill.style.width = pct + '%';
+    pctEl.textContent = `${s.current.toLocaleString()} / ${s.total.toLocaleString()} (${pct}%)`;
+  } else {
+    fill.classList.add('indeterminate');
+    fill.style.width = '';
+    pctEl.textContent = '';
+  }
+  if (s.done && s.stage === 'done') {
+    fill.classList.remove('indeterminate');
+    fill.style.width = '100%';
+  }
+}
+
+function hideProgressLater(ms = 4000) {
+  setTimeout(() => {
+    document.getElementById('scrape_progress').classList.remove('visible');
+  }, ms);
+}
+
+async function scrapeCsv() {
+  document.getElementById('compact_hidden').value =
+    document.getElementById('compact_check').checked ? '1' : '0';
+  document.getElementById('fname_hidden').value =
+    document.getElementById('fname_input').value || '';
+
+  const btn = document.getElementById('scrape_btn');
+  const note = document.getElementById('export-note');
+  const origLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Scraping...';
+  note.textContent = '';
+  updateProgressUI({ stage: 'queued', current: 0, total: 0, message: 'starting...' });
+
+  let jobId = null;
+  try {
+    const startResp = await fetch('/scrape/start', { method: 'POST', body: new FormData(form) });
+    if (!startResp.ok) {
+      note.textContent = `Scrape failed to start (${startResp.status}).`;
+      updateProgressUI({ stage: 'error', message: `start failed: HTTP ${startResp.status}` });
+      return;
+    }
+    const startData = await startResp.json();
+    jobId = startData.job_id;
+    updateProgressUI({
+      stage: 'queued', current: 0, total: 0,
+      message: `${startData.lead_count.toLocaleString()} leads · ${startData.unique_eins.toLocaleString()} unique EINs`,
+    });
+
+    // Poll for status until done.
+    while (true) {
+      await new Promise(r => setTimeout(r, 750));
+      const sResp = await fetch(`/scrape/status/${jobId}`);
+      if (!sResp.ok) {
+        updateProgressUI({ stage: 'error', message: `status fetch failed: HTTP ${sResp.status}` });
+        return;
+      }
+      const s = await sResp.json();
+      updateProgressUI(s);
+      if (s.done) {
+        if (s.error) {
+          note.textContent = `Scrape failed: ${s.error}`;
+          return;
+        }
+        // Trigger the file download.
+        const dlUrl = `/scrape/result/${jobId}`;
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        document.body.appendChild(a); a.click(); a.remove();
+        note.textContent = 'Scrape complete — check your Downloads folder.';
+        hideProgressLater();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error(e);
+    note.textContent = 'Scrape failed — see the browser console / terminal.';
+    updateProgressUI({ stage: 'error', message: String(e) });
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origLabel;
+  }
+}
+
+function resetFilters() {
+  multiSelects.forEach(ms => ms.reset());
+  form.querySelectorAll('input[type="checkbox"]').forEach(el => { el.checked = false; });
+  form.querySelectorAll('input[type="radio"]').forEach(el => { el.checked = el.value === ''; });
+  form.querySelectorAll('input[type="text"], input[type="number"]').forEach(el => { el.value = ''; });
+  document.getElementById('compact_check').checked = false;
+  document.getElementById('fname_input').value = '';
+  document.getElementById('sort_col_select').value = 'REVENUE_AMT';
+  document.getElementById('sort_desc_check').checked = true;
+  document.getElementById('preview_limit_select').value = '500';
+  document.getElementById('sort_col').value = 'REVENUE_AMT';
+  document.getElementById('sort_desc').value = '1';
+  document.getElementById('preview_limit').value = '500';
+  refreshMap();
+  updateResults();
+}
+
+refreshMap();
+updateResults();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# data + outputs
+data/
+output/
+*.csv
+*.zip
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# editors
+.vscode/
+.idea/
+.DS_Store
+
+# claude code session files (not part of the app)
+.claude/
