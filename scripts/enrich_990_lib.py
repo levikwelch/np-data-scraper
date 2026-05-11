@@ -16,9 +16,12 @@ All XML extracts are cached on disk per-EIN, so repeated calls are cheap.
 """
 from __future__ import annotations
 
+import os
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Lock
 from typing import Callable, Iterable
 from xml.etree import ElementTree as ET
 
@@ -66,11 +69,21 @@ zipfile._get_decompressor = _patched_get
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
+# DATA_ROOT honors the env var so caches land on the persistent volume in
+# production (e.g. /data on the Hostinger Docker deploy). The XML and index
+# caches MUST live here, not inside the container image, or every redeploy
+# discards hours of fetch work.
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", ROOT))
+DATA_DIR = DATA_ROOT / "data"
 XML_CACHE = DATA_DIR / "irs_990_cache"
 INDEX_CACHE = DATA_DIR / "irs_990_index"
 XML_CACHE.mkdir(parents=True, exist_ok=True)
 INDEX_CACHE.mkdir(parents=True, exist_ok=True)
+
+# Phase-1 fan-out across IRS batch ZIPs. Each batch is a Range-request HTTP
+# download against apps.irs.gov; 5 in parallel is well below any reasonable
+# rate limit and roughly 4x faster than the original serial loop.
+BATCH_FETCH_WORKERS = 5
 
 # IRS processing years to search, newest first. The "year" is when the IRS
 # *processed* the return, not the tax year — pre-2024 indexes lack the
@@ -273,20 +286,18 @@ def enrich_eins(
     total_batches = len(by_batch)
     if log:
         log(f"spans {total_batches} batch ZIPs")
-    _emit("fetching_batches", f"fetching {total_batches} batch ZIPs", current=0, total=total_batches)
+    _emit("fetching_batches",
+          f"fetching {total_batches} batch ZIPs ({BATCH_FETCH_WORKERS} in parallel)",
+          current=0, total=total_batches)
 
-    for i, ((year, batch_id), members) in enumerate(by_batch.items(), 1):
+    # Lock guards parsed_by_ein since multiple batch fetchers append concurrently.
+    parsed_lock = Lock()
+
+    def _fetch_one_batch(year: int, batch_id: str,
+                         members: list[tuple[str, str]]) -> str | None:
+        """Download one batch ZIP and extract every member XML into the cache.
+        Returns None on success, an error string on permanent failure."""
         url = BATCH_URL.format(year=year, batch_id=batch_id.upper())
-        if log:
-            log(f"batch {i}/{total_batches}: {batch_id} ({len(members)} members)")
-        _emit(
-            "fetching_batches",
-            f"batch {i}/{total_batches}: {batch_id} ({len(members)} EINs)",
-            current=i - 1,
-            total=total_batches,
-        )
-
-        last_err: Exception | None = None
         for attempt in range(3):
             try:
                 with RemoteZip(url) as z:
@@ -302,18 +313,40 @@ def enrich_eins(
                         cache_path.write_text(xml_text, encoding="utf-8")
                         parsed = parse_xml(xml_text)
                         parsed["latest_990_year"] = year
-                        parsed_by_ein[ein] = parsed
-                last_err = None
-                break
+                        with parsed_lock:
+                            parsed_by_ein[ein] = parsed
+                return None
             except (RemoteIOError, requests.RequestException, ConnectionError) as e:
-                last_err = e
-                wait = 2 ** attempt
-                if log:
-                    log(f"  net error on {batch_id} (attempt {attempt + 1}/3): {e} — retry in {wait}s")
-                time.sleep(wait)
+                if attempt < 2:
+                    wait = 2 ** attempt
+                    if log:
+                        log(f"  net error on {batch_id} (attempt {attempt + 1}/3): {e} — retry in {wait}s")
+                    time.sleep(wait)
+                else:
+                    return f"{e}"
+        return "unreachable"
 
-        if last_err is not None and log:
-            log(f"  giving up on {batch_id} after 3 attempts")
+    completed = 0
+    completed_lock = Lock()
+    with ThreadPoolExecutor(max_workers=BATCH_FETCH_WORKERS) as ex:
+        futures = {
+            ex.submit(_fetch_one_batch, year, batch_id, members):
+                (year, batch_id, len(members))
+            for (year, batch_id), members in by_batch.items()
+        }
+        for fut in as_completed(futures):
+            year, batch_id, n_members = futures[fut]
+            err = fut.result()
+            with completed_lock:
+                completed += 1
+                idx = completed
+            if log:
+                tag = f"batch {idx}/{total_batches}: {batch_id} ({n_members} members)"
+                log(f"{tag} {'failed: ' + err if err else 'done'}")
+            _emit("fetching_batches",
+                  f"batch {idx}/{total_batches}: {batch_id} ({n_members} EINs)"
+                  + (f" — failed: {err}" if err else ""),
+                  current=idx, total=total_batches)
 
     # Attach latest_990_year for the ones served from cache too.
     for ein, info in lookup.items():

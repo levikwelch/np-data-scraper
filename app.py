@@ -544,7 +544,7 @@ SCRAPE_LOCK = threading.Lock()
 NEW_CONTACT_COLS = ("phone", "website", "principal_officer_name", "mission", "latest_990_year")
 
 
-EMAIL_SCRAPE_WORKERS = 20  # spec's recommendation for Phase 1 fan-out
+EMAIL_SCRAPE_WORKERS = 50  # network-bound; VPS has plenty of headroom
 
 
 def _scrape_emails_for(parsed: dict[str, dict],

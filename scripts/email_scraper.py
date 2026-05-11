@@ -104,12 +104,14 @@ def _clean_matches(html_text: str) -> list[str]:
 
 
 def _fetch_emails_from_url(url: str) -> list[str]:
-    """Fetch one URL and return cleaned emails in discovery order. Never raises."""
+    """Fetch one URL and return cleaned emails in discovery order. Never raises.
+    Timeout is (connect=4s, read=6s) — tight enough to skip dead/slow sites
+    quickly without losing sites that respond at a reasonable pace."""
     try:
         resp = _session.get(
             url,
             headers=SCRAPE_HEADERS,
-            timeout=(5, 10),
+            timeout=(4, 6),
             allow_redirects=True,
         )
     except Exception:
