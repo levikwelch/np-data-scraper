@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from flask import Flask, Response, jsonify, render_template, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -398,6 +399,11 @@ def _serializable(v: Any) -> Any:
 
 
 app = Flask(__name__)
+# Honor X-Forwarded-* headers from the reverse proxy (Caddy) so url_for()
+# generates correct absolute URLs when the app is mounted under a path
+# prefix like /leads/. Caddy sends X-Forwarded-Prefix; ProxyFix reads it
+# into SCRIPT_NAME. Safe locally too (no proxy = no headers = no effect).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.json.sort_keys = False  # preserve count-descending order in breakdown dicts
 app.config["TEMPLATES_AUTO_RELOAD"] = True  # pick up index.html edits without restart
 app.jinja_env.auto_reload = True
