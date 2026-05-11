@@ -10,6 +10,7 @@ Cross-references data/propublica_cache/ for the "enrichment cached" filter.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -190,6 +191,29 @@ def _original_fname(saved: Path) -> str:
     """Extract the user-facing filename from an on-disk scrape (strip job_id prefix)."""
     name = saved.name
     return name.split("__", 1)[1] if "__" in name else name
+
+
+def _partial_path(job_id: str) -> Path:
+    return SCRAPES_DIR / f"{job_id}__partial.json"
+
+
+def _save_partial_emails(job_id: str, results: dict[str, list[str]]) -> None:
+    """Best-effort checkpoint of phase 2 progress. Lets us recover whatever
+    emails were scraped if the worker dies before the final CSV is built.
+    Silent on failure — checkpointing must never break a scrape."""
+    try:
+        SCRAPES_DIR.mkdir(parents=True, exist_ok=True)
+        _partial_path(job_id).write_text(json.dumps(results), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_partial(job_id: str) -> None:
+    """Remove the partial checkpoint once the full CSV is safely on disk."""
+    try:
+        _partial_path(job_id).unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _resolve_contact_csv() -> Path | None:
@@ -548,7 +572,8 @@ EMAIL_SCRAPE_WORKERS = 50  # network-bound; VPS has plenty of headroom
 
 
 def _scrape_emails_for(parsed: dict[str, dict],
-                       progress_cb) -> dict[str, list[str]]:
+                       progress_cb,
+                       job_id: str | None = None) -> dict[str, list[str]]:
     """Phase 1 only: HTTP-fetch emails from every website returned by enrich_eins.
 
     Returns {ein_clean: ranked_emails}. Skips EINs without a website. Phase 2
@@ -591,6 +616,10 @@ def _scrape_emails_for(parsed: dict[str, dict],
                              "total": total,
                              "message": f"{done:,}/{total:,} sites scraped, "
                                         f"{len(results):,} with emails"})
+            # Periodic disk checkpoint — every 250 sites — so a worker death
+            # mid-scrape leaves a recoverable JSON dump of emails found so far.
+            if job_id and (done % 250 == 0 or done == total):
+                _save_partial_emails(job_id, results)
     return results
 
 
@@ -666,7 +695,7 @@ def scrape_start():
                 log=lambda m: print(f"[scrape:{job_id}] {m}", flush=True),
                 progress=progress_cb,
             )
-            emails_by_ein = _scrape_emails_for(parsed, progress_cb)
+            emails_by_ein = _scrape_emails_for(parsed, progress_cb, job_id=job_id)
             csv_str = _build_scrape_csv(filt, parsed, emails_by_ein, compact)
             fname = fname_raw or f"grant_candidates_scraped_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             if not fname.lower().endswith(".csv"):
@@ -676,6 +705,7 @@ def scrape_start():
             # here and the SCRAPE_LOCK update doesn't lose the result.
             try:
                 _save_scrape_to_disk(job_id, csv_str, fname)
+                _clear_partial(job_id)
                 print(f"[scrape:{job_id}] persisted to {SCRAPES_DIR}/{job_id}__*",
                       flush=True)
             except Exception as e:

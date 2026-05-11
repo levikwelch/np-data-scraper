@@ -20,4 +20,4 @@ EXPOSE 8000
 # Ensure the data/output subdirs exist on the mounted volume before
 # gunicorn loads app.py (which fails fast if MASTER_CSV is missing,
 # but the dirs themselves must be present so we don't error earlier).
-CMD ["sh", "-c", "mkdir -p $DATA_ROOT/data $DATA_ROOT/output && exec gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:8000 app:app"]
+CMD ["sh", "-c", "mkdir -p $DATA_ROOT/data $DATA_ROOT/output && exec gunicorn --workers 1 --threads 8 --timeout 0 --bind 0.0.0.0:8000 app:app"]
