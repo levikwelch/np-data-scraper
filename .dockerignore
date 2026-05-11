@@ -1,0 +1,19 @@
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+__pycache__
+*.pyc
+.venv
+venv
+
+# data/output live on the persistent volume, not in the image
+data/
+output/
+*.csv
+*.zip
+
+# render-specific, not used in the docker deploy
+render.yaml

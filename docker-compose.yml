@@ -1,0 +1,50 @@
+# Compose file for Hostinger VPS deployment alongside an existing n8n stack.
+#
+# Architecture:
+#   - n8n's compose (in /docker/n8n/) runs Traefik + n8n on the network
+#     "n8n_default". Traefik discovers backends via Docker labels.
+#   - This compose builds the Flask app image, joins n8n_default as an
+#     external network, and tags itself with labels so Traefik routes
+#     https://leads.srv1293193.hstgr.cloud/ to it and auto-issues a
+#     Let's Encrypt cert via the existing mytlschallenge resolver.
+#
+# First-time setup on the VPS:
+#   git clone https://github.com/levikwelch/np-data-scraper.git /docker/leads
+#   cd /docker/leads
+#   docker compose up -d --build
+#   # build master CSV (~5-10 min the first time):
+#   docker compose exec app python scripts/01_download_irs_bmf.py
+#   docker compose exec app python scripts/02_filter_candidates.py
+#   docker compose restart app
+#
+# After that, https://leads.srv1293193.hstgr.cloud should load.
+#
+# To redeploy after pushing code changes from your laptop:
+#   cd /docker/leads && git pull && docker compose up -d --build
+
+services:
+  app:
+    build: .
+    container_name: leads
+    restart: unless-stopped
+    networks:
+      - n8n_default
+    volumes:
+      - leads_data:/data
+    environment:
+      - DATA_ROOT=/data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.leads.entrypoints=web,websecure
+      - traefik.http.routers.leads.rule=Host(`leads.srv1293193.hstgr.cloud`)
+      - traefik.http.routers.leads.tls=true
+      - traefik.http.routers.leads.tls.certresolver=mytlschallenge
+      - traefik.http.services.leads.loadbalancer.server.port=8000
+
+networks:
+  n8n_default:
+    external: true
+
+volumes:
+  leads_data:
